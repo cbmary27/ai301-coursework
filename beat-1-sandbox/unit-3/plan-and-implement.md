@@ -19,6 +19,8 @@ cbmary27
 
 **Plan comment**
 
+https://github.com/codepath/pathreview-ai301-fa26-s1/issues/53#issuecomment-6005430632
+
 Plan
 Diagnosis
 Problem
