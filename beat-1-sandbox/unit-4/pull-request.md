@@ -40,7 +40,7 @@ agreement: 19/20 scored items  (bar: 18/20: PASS)
 scored). Name it by id, say what your rubric decided and what the gold label said, and
 explain why your rubric read it that way.]
 
-pkg-19: My rubric judged the candidate PR as acceptable because the fix follows the accepted plan, makes a narrowly scoped change to the single-quoted scalar emitter, and adds a regression test. The gold label agreed with this assessment. The reported byte-identical round-trip and passing test suite support the fix's correctness.
+pkg-19: My rubric judged the candidate PR as rejected because, despite the narrowly scoped emitter fix and regression test, the submitted evidence did not fully demonstrate the observed after-output, and the diff included unplanned files and removed test lines that were not disclosed. The gold label agreed with the rejection, highlighting the importance of complete test evidence and fidelity between the accepted plan, actual diff, and PR description.
 
 **Check rationale**
 
