@@ -15,15 +15,11 @@ label is not graded.
 
 **Pull request**
 
-[Link to the pull request you opened. It must be the pull request's own page on the Path
-Review repo, not your fork's branch page.]
+https://github.com/codepath/pathreview-ai301-fa26-s1/pull/173
 
 **Branch**
 
-[The name of the branch the pull request comes from, exactly as it appears in your fork.
-The naming shape is a type prefix, then the issue number, then a short description. **The
-issue number in the branch name must be the number of the issue the pull request fixes** —
-a name carrying any other number does not satisfy this field.]
+fix/53-pii-phone-redaction
 
 ## Eval iterations
 
@@ -36,11 +32,15 @@ fields.
 only one run occurred. **The last score in your list must match the agreement line in the
 `eval-run.txt` you committed** — that file is the record of your final run.]
 
+agreement: 19/20 scored items  (bar: 18/20: PASS)
+
 **Package analysis**
 
 [Pick one scored package (`pkg-01` through `pkg-20` — the four `calib-` packages are never
 scored). Name it by id, say what your rubric decided and what the gold label said, and
 explain why your rubric read it that way.]
+
+pkg-19: My rubric judged the candidate PR as acceptable because the fix follows the accepted plan, makes a narrowly scoped change to the single-quoted scalar emitter, and adds a regression test. The gold label agreed with this assessment. The reported byte-identical round-trip and passing test suite support the fix's correctness.
 
 **Check rationale**
 
@@ -48,12 +48,13 @@ explain why your rubric read it that way.]
 Then say why it reads that way — what you revised to get there, or what you rejected in
 favour of it.]
 
+| Plan fidelity | Diff compared with `plan.md`, its deviations, issue requirements, and PR description | All changes are within the declared scope, or any omissions and deviations are honestly disclosed in the plan and description. | required |
+
+I chose this check because it evaluates whether the implementation matches the accepted plan and whether the PR accurately describes its changes. I prioritized scope control and honest reporting over accepting a fix based only on passing tests.
+
 **Trade-offs**
 
-[Every check gives something up. Any one of these is a complete answer: a package whose
-result it changes, a canary you re-ran with `--only`, a case you accept it will miss, or a
-stated reason nothing changed elsewhere. "Nothing changed, and here is how I know" earns
-the point in full when the reason follows.]
+The plan-fidelity check may reject a technically correct fix if it deviates from the accepted plan, even when the deviation is harmless. I accepted this trade-off because scope control and accurate PR descriptions are important for reviewability. I made no further changes because the check already covered the key requirement for this package: matching the implementation to the plan and disclosing deviations honestly.
 
 ---
 
