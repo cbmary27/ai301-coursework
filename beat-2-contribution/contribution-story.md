@@ -58,9 +58,9 @@ one in the week it belongs to.
 
 I installed the scout over my Unit 1 skill, rewrote my fit profile around good first issues and small bugs in Python, Java, Go and Kotlin, and wrote six `gh search issues` queries plus ranking rules (drop assigned, stale or long-thread issues, one per repo, bugs first, fewest comments). The first scan pulled 558 unique issues and graded the top 5, but "fewest comments first" mostly surfaced issues opened that same day in brand-new repos with 0-28 stars, often filed by the maintainers' own AI agents. My rubric passed them because it has no adoption check, and the ranking let K1rL3s/maxo#388 through with a fixing PR already open, since search results don't carry cross-references (the rubric's "not taken up" check caught it). I logged both gaps in scan-notes.md rather than patching blindly, and took my real picks from the Issue Selection site.
 
-**Unit 6: Installed the voice guard and wrote the Upstream section of my voice guide**
+**Unit 6: Installed the voice guard, wrote my Upstream voice rules, and gave Claude a memory file for agntcy/dir**
 
-I moved my voice guide to `~/.claude/voice-guard/`, added Upstream rules for claims, questions and pings (using my own vague nomnom comment as a "Wrong" example and my agntcy follow-up as a "Right" one), and merged the guard's PreToolUse hook into my Claude Code settings. Two things broke on Windows: `python3` is only the Microsoft Store placeholder there, so the hook would have failed silently until I changed its command to `python`; and Git Bash's `ln -s` makes copies instead of links, so I used the one-line pointer files in each skill instead. The bigger shortfall was timing: I posted my claim on agntcy/dir#1874 before the guard existed, so it never checked my claim before it went up; checking the posted text afterwards is the honest version of that step, and it hasn't been run yet. My repo memory file (`CLAUDE.local.md` in my agntcy clone) is not written yet as of 2026-11-10.
+I added Upstream rules for claims, questions and pings to my voice guide (my vague nomnom comment became a "Wrong" example) and wired the guard in as a Claude Code hook. On Windows that broke twice: `python3` is only a Microsoft Store placeholder, so I changed the hook to call `python`, and Git Bash's `ln -s` silently makes copies, so I used one-line pointer files instead. My claim on #1874 was posted before the guard existed, so I ran the guard's manual check on it afterwards: it stopped my 2026-11-08 comment on my own rule "A claim names my first step and when I'll report back", and repro-check rejected it as not specific to the issue. Only my 2026-11-09 follow-up made the claim pass. While doing that I found that my installed repro-check had been grading with my Unit 3 plan-check rubric, so I restored my Unit 2 rubric from `tools/repro-check/`. I also wrote `CLAUDE.local.md` in my clone (DCO sign-off, the scan subsystem's 4 key files, the exact build and test commands, and the WSL PATH fix Go and Task need), kept out of git with `.git/info/exclude`.
 
 **Unit 7: [one line on the tool work]**
 
@@ -122,31 +122,41 @@ Claim comment: https://github.com/agntcy/dir/issues/1874#issuecomment-6724098685
 
 **Environment Setup**
 
-[What a stranger would need to stand this up: your operating system,
-the relevant versions (language, runtime, package manager, the project
-itself), and how you set the project up. Then the challenges you faced
-and how you solved them, or that none came up.]
+Windows 11 host with WSL2 (Ubuntu 24.04.3 LTS), Go 1.27.2, Task 3.54.0 and Docker Desktop. I cloned https://github.com/agntcy/dir and followed the README's Development section: `task deps`, `task build`, then `task test:unit`, which all passed on `main`. The reproduction ran on a clean worktree of `main` at `226a94c9` (2026-11-11), so my local clone's changes didn't affect it. The issue is a feature request and states no environment; the database tests use in-memory SQLite, so the result doesn't depend on the OS or a running server.
+
+Challenges: Go and Task weren't on the PATH in non-interactive WSL shells, so commands failed with "go: command not found" until I exported `/usr/local/go/bin` and `$HOME/go/bin`. The repo's pre-commit hook (golangci-lint, run through `task`) failed for the same reason, and then reformatted my test file; I re-staged its changes instead of skipping the hook.
 
 **Steps to Reproduce**
 
-1. [Step 1]
-2. [Step 2]
-3. [Observed result]
+Since #2086 (via #2095), `scan_reports` records a completed/partial/failed outcome per record and scanner, so I reproduced the parts of #1874 that are still missing.
+
+1. Check out `main` (I used `226a94c9`) and add `server/database/gorm/scan_history_repro_test.go` from my fork's commit (below). Using the existing test helpers, it writes two scans for the same record and scanner (first `failed` with reason `network`, then `completed`) and expects two `scan_reports` rows.
+2. Run `cd server && go test ./database/gorm/ -run TestRepro1874 -v -count=1`.
+3. Search for the states and API the issue asks for: `grep -nE "ScanStatus(Completed|Partial|Failed) *=" server/types/database.go`, `git grep -nIE "NewScan|ListScans|security_scans|ScanStatusPending|ScanStatusRunning" -- "*.go" "*.proto"`, and `grep -n "^service" proto/agntcy/dir/security/v1/*.proto`.
+4. Observed: the test fails with one row left (the failed scan was overwritten by the completed one). Only completed, partial and failed statuses exist, and both searches for the API return nothing.
 
 **Reproduction Evidence**
 
-- **Commit showing reproduction:** [link to commit in your fork]
-- **Screenshots/logs:** [if applicable]
-- **My findings:** [what you discovered during reproduction; an
-  honest, evidenced cannot-reproduce that led you to re-pick or ask
-  the maintainer belongs here and costs you nothing]
+- **Commit showing reproduction:** https://github.com/cbmary27/dir/commit/4221fc507877f75addd9858b87cc732cd5665318 (branch `repro/1874-scan-history` on my fork)
+- **Screenshots/logs:**
+
+  ```
+  scan_history_repro_test.go:29: scan_reports row: status=completed failure_reason="" consecutive_failures=0
+  Error:     "[{baeareitestscan... MCP true NONE completed   0 ...}]" should have 2 item(s), but has 1
+  Messages:  expected one row per scan (failed, then completed); scan_reports keeps only the latest
+  --- FAIL: TestRepro1874_ScanHistoryIsKept (0.02s)
+  FAIL	github.com/agntcy/dir/server/database/gorm	0.056s
+  ```
+
+  `server/types/database.go` defines only `ScanStatusCompleted = "completed"` (line 221), `ScanStatusPartial = "partial"` (225) and `ScanStatusFailed = "failed"` (228). `git grep` for `NewScan`, `ListScans`, `security_scans`, `ScanStatusPending` and `ScanStatusRunning` exits 1 (no matches), and no `.proto` in `security/v1/` defines a `service`.
+- **My findings:** The three gaps #1874 describes are still real on `main`. `ScanReport` is keyed by `(record_cid, scanner_type)` and `UpsertScanReport` (`server/database/gorm/scan.go`) does `ON CONFLICT ... DO UPDATE`, so every scan replaces the last and there's no history. There are no pending or running states. Scans start only from the reconciler's scan task on its interval (`reconciler/tasks/scan/task.go`, via `GetRecordsNeedingScan`); the Go client only has `PushScanReport` and `dirctl` has no scan command, so a user can't request or list scans. Part of the original request (recording outcomes) was already covered by #2086, which I noted in my follow-up comment.
 
 **Toolkit**
 
-- Tool:
-- What it produced:
-- Difficulties:
-- What changed:
+- Tool: repro-check, live mode. I graded my claim alone first, then my claim plus repro report together (`claim-draft.md` and `repro-draft.md`), against my Unit 2 rubric and my voice guide.
+- What it produced: the claim-only grade rejected my 2026-11-08 comment ("set up the project locally, explore the existing codebase" names nothing specific to the issue). The first full-package grade passed the repro but still rejected on that claim, and flagged that step 2 only showed a snippet of the test. After I added my 2026-11-09 follow-up (part 2 of my claim, as posted) and the fork commit link, it accepted.
+- Difficulties: my installed repro-check had been grading with my Unit 3 plan-check rubric and evidence guide ("is this plan ready to post"), probably copied over in Unit 3. My Unit 2 rubric also assumes a bug with an environment to match, which fits awkwardly with a feature request.
+- What changed: I restored my Unit 2 rubric and evidence guide from `tools/repro-check/` in my course repo. I pushed the repro test to my fork so the steps link to the full file instead of a snippet. I'd add a line to the rubric's environment check covering issues that state no environment.
 
 ---
 
