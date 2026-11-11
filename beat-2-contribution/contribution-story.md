@@ -1,4 +1,4 @@
-# Contribution: [Issue Title]
+# Contribution: [Feature]: Track security scans and their progress
 
 Path: `beat-2-contribution/contribution-story.md`
 
@@ -8,10 +8,9 @@ format criteria grade exactly that. Your course repo link is the whole submissio
 files and no evidence uploads are part of Assignment 5.
 
 **Contribution Number:** [1]
-**Student:** [Student name]
-**GitHub Username:** [your GitHub username, exactly as it appears on your profile - no @, no
-profile URL. Your comments upstream are identified by this name.]
-**Issue:** [GitHub issue link]
+**Student:** Chris
+**GitHub Username:** cbmary27
+**Issue:** https://github.com/agntcy/dir/issues/1874
 **Pull Request:** [GitHub PR link, once opened]
 
 One repository, built across units 5 to 8, telling the whole story of your real
@@ -55,16 +54,13 @@ happened; these entries are the toolkit's own timeline.
 All four entries are graded. Keep every heading below, and fill each
 one in the week it belongs to.
 
-**Unit 5: [one line on the tool work]**
+**Unit 5: Turned my Unit 1 issue-select skill into issue-scout and gave it a search strategy**
 
-[2-4 sentences: what you built (the scout, your strategy), what broke
-or fell short, what changed because of it.]
+I installed the scout over my Unit 1 skill, rewrote my fit profile around good first issues and small bugs in Python, Java, Go and Kotlin, and wrote six `gh search issues` queries plus ranking rules (drop assigned, stale or long-thread issues, one per repo, bugs first, fewest comments). The first scan pulled 558 unique issues and graded the top 5, but "fewest comments first" mostly surfaced issues opened that same day in brand-new repos with 0-28 stars, often filed by the maintainers' own AI agents. My rubric passed them because it has no adoption check, and the ranking let K1rL3s/maxo#388 through with a fixing PR already open, since search results don't carry cross-references (the rubric's "not taken up" check caught it). I logged both gaps in scan-notes.md rather than patching blindly, and took my real picks from the Issue Selection site.
 
-**Unit 6: [one line on the tool work]**
+**Unit 6: Installed the voice guard and wrote the Upstream section of my voice guide**
 
-[2-4 sentences: the voice-guard, the repo-memory file. What broke or
-fell short, and what changed because of it. "Nothing broke" counts when
-it is true - say how you know.]
+I moved my voice guide to `~/.claude/voice-guard/`, added Upstream rules for claims, questions and pings (using my own vague nomnom comment as a "Wrong" example and my agntcy follow-up as a "Right" one), and merged the guard's PreToolUse hook into my Claude Code settings. Two things broke on Windows: `python3` is only the Microsoft Store placeholder there, so the hook would have failed silently until I changed its command to `python`; and Git Bash's `ln -s` makes copies instead of links, so I used the one-line pointer files in each skill instead. The bigger shortfall was timing: I posted my claim on agntcy/dir#1874 before the guard existed, so it never checked my claim before it went up; checking the posted text afterwards is the honest version of that step, and it hasn't been run yet. My repo memory file (`CLAUDE.local.md` in my agntcy clone) is not written yet as of 2026-11-10.
 
 **Unit 7: [one line on the tool work]**
 
@@ -80,24 +76,18 @@ drafted, what you did with the draft.]
 
 ## Why I Chose This Issue
 
-[1-2 paragraphs in your own words: how you searched, what your scan
-surfaced, what your scout's verdict said, why this issue fits your
-profile, and what you hope to learn. If your scout's verdict on it
-was reject and you chose it anyway, say so here and say why; choosing
-against your own tool silently is what loses points. Close with an
-honest read of the tool itself: where the scout fell short on a real
-wild search and what you changed or would change, or what convinced
-you it held up. **Record the link to your claim comment in this section too.**
-Not claimed yet? Write `claim pending` and today's date where the link goes,
-and add the link the moment your claim lands.]
+My scout's own scan of GitHub (558 issues, top 5 graded) mostly turned up brand-new single-author repos, so I took my real candidates from the AI301 Issue Selection site, filtered toward my profile: agntcy/dir#1874 (Go), WorldconVotingSystems/nomnom#277 (Python) and Altinn/altinn-studio#12123 (TypeScript in a C# monorepo). On the first grade, my scout accepted nomnom and Altinn and **rejected #1874** on "Issue is not taken up": another contributor, tnknick14, had volunteered and been assigned in July, inside my 6-month window. Reading the timeline showed that a maintainer unassigned them on 2026-09-03 after asking about progress, and they never opened a PR, so in practice the issue was free. My rubric couldn't tell a released claim from a live one, and it counted my own comments as claims. I patched that check, and after the Unit 6 scope patch the regrade accepted all three: nomnom ranked first on fit (moderate), #1874 second (**ambitious**: whether scan history belongs in a new table or the existing `scan_reports`, and what retention should be), Altinn third.
+
+I chose #1874 over the scout's top-ranked nomnom. It's bigger, but it's more direct: the issue names the table, the states and the API (`NewScan`/`ListScans` keyed on `cid`), so there's less guessing about what the maintainers want. It's in Go, which I'm learning this term, and it's backend API and CLI work, which is the full-stack side I want to get better at. I hope to learn how a real Go service adds a database table, a proto service and a CLI command end to end, and how to work through open design questions with maintainers. Since the difficulty note says ambitious, I raised both open questions in my follow-up before starting. Honestly, the scout's grading held up on the things it checks (it caught an open fixing PR that ranking missed), but it fell short in two ways: its ranking rewards newness, not health, and its claim check only understood claims being made, not released. I fixed the second; the first still needs an adoption check (stars or recent outside contributors) in the rubric.
+
+Claim comment: https://github.com/agntcy/dir/issues/1874#issuecomment-6724098685 (posted 2026-11-08; follow-up with setup and proposed approach: https://github.com/agntcy/dir/issues/1874#issuecomment-6742685664)
 
 **Toolkit**
 
-- Tool: issue-scout (your scout: your search strategy, your rubric),
-  and how you used it
-- What it produced: [the scan and its verdict on this issue, described]
-- Difficulties: [where it fell short, or "none met" if none did]
-- What changed: [what you patched or would update, or "nothing"]
+- Tool: issue-scout. I ran one scan with my search strategy, then graded my three Issue Selection picks directly with my rubric, twice: once as written, then again after the Unit 6 patches.
+- What it produced: the scan graded 5 issues (4 accept, 1 reject for an open fixing PR). On my picks, the first grade rejected #1874 on "Issue is not taken up". The regrade accepted it with an "ambitious" difficulty note naming the table-vs-`scan_reports` and retention questions.
+- Difficulties: the ranking favored issues opened the same day in tiny new repos, and the rubric has no adoption check. The "not taken up" check treated a claim a maintainer had already released as live, and counted my own comments as claims.
+- What changed: I applied the Unit 6 scope patch, replacing my "Issue is ideal for beginners" check with the required "scope-feasible" row plus the difficulty note. I also rewrote "Issue is not taken up" so a maintainer unassigning someone releases their claim and my own comments never block. Still to do: add an adoption check to the rubric.
 
 ---
 
