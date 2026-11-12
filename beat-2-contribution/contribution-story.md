@@ -257,12 +257,12 @@ Wrong turn: my repro test asserts that `scan_reports` keeps two rows, but the ag
 
 **2026-11-11**
 
-Built layer 1 on `feat/1874-security-scans` (not committed yet): the types, the `SecurityScan` model and its DB methods, the transaction helper in `scan.go`, cascade and `AutoMigrate`, and 13 tests. Claude wrote the code; I asked for it file by file at first, then a layer at a time, and reviewed it. Decisions: column `scan_trigger` (SQL keyword), verdict copied into each history row, and `FinishScannerRun` rolling back the `scan_reports` write if its history row is missing. Then two changes after my review: a request now stays `pending` until a scanner actually starts, instead of turning `running` when the reconciler picks it up; and `DiscardScannerRun` handles scanners that turn out not to apply.
+Built layer 1 on `feat/1874-security-scans` (not committed yet): the types, the `SecurityScan` model and its DB methods, the transaction helper in `scan.go`, cascade and `AutoMigrate`, and 13 tests. Decisions: column `scan_trigger` (SQL keyword), verdict copied into each history row, and `FinishScannerRun` rolling back the `scan_reports` write if its history row is missing. Then two changes after my review: a request now stays `pending` until a scanner actually starts, instead of turning `running` when the reconciler picks it up; and `DiscardScannerRun` handles scanners that turn out not to apply.
 
 **Toolkit**
 
-- Tool: Claude Code writing the code a file or a layer at a time while I reviewed each step, and the repo's pre-commit hook (golangci-lint through `task`).
-- What it produced: layer 1 (7 files: 2 new, 5 edited) with tests, plus a whitespace-ignored diff showing `scan.go`'s logic is unchanged.
+- Tool: I used Claude Code assisstance in writing the code for a file or a layer at a time while I reviewed each step and led the design decisions, and the repo's pre-commit hook (golangci-lint through `task`).
+- produced: layer 1 (7 files: 2 new, 5 edited) with tests, plus a whitespace-ignored diff showing `scan.go`'s logic is unchanged.
 - Difficulties: edits sent through `wsl` with a heredoc silently didn't apply once (the linter output stayed the same, which is how I caught it); the pre-commit hook needs Go and Task on the PATH; and a test fake implements the whole database interface by hand, so new methods broke its compile until I added stubs.
 - What changed: the edits now go through script files instead of heredocs, I export the PATH in every WSL command, and I wrapped errors the way the linter asked.
 
