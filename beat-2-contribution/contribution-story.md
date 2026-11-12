@@ -95,26 +95,31 @@ Claim comment: https://github.com/agntcy/dir/issues/1874#issuecomment-6724098685
 
 **Problem Description**
 
-[In your own words, what is broken or missing?]
+Directory security-scans the records (agent descriptions) it stores, but it only remembers the latest result. Each scan of a record overwrites the previous one, so there's no history of past scans, no way to see that a scan is waiting or in progress, and no way for an admin to ask for a scan or list a record's scans. Part of the original request was already covered by #2086 (fixed in #2095), which added a completed/partial/failed outcome to `scan_reports`. What's still missing is history, pending/running states, and an API and CLI to start and list scans.
 
 **Expected Behavior**
 
-[What should happen?]
+Every scan attempt should be kept as its own row, so a record's rows make up its scan history, with progress states (`pending` → `running` → `succeeded`/`failed`). An admin should be able to request a scan by record CID (`NewScan`) and list a record's scans, optionally by status (`ListScans`). The design was agreed with the maintainers on the issue thread: akijakya proposed a separate history table and answered my two questions ([comment](https://github.com/agntcy/dir/issues/1874#issuecomment-6795743395)), ramizpolic agreed and asked for no cleanup job yet and admin-only auth ([comment](https://github.com/agntcy/dir/issues/1874#issuecomment-6797562597)), and I confirmed what I'd build ([my reply](https://github.com/agntcy/dir/issues/1874#issuecomment-6807933518)).
 
 **Current Behavior**
 
-[What actually happens?]
+`scan_reports` keeps exactly one row per record and scanner, and every scan replaces it. In my reproduction, a failed scan followed by a completed scan leaves one row: the failure is gone. The only statuses are completed, partial and failed. Scans only start when the reconciler's background task picks a record on its interval, and there is no RPC, Go client call or `dirctl` command to start or list them.
 
 **Affected Components**
 
-[Which parts of the codebase are involved?]
+- `server/database/gorm/scan.go`: the `ScanReport` model and `UpsertScanReport`, which overwrites the row
+- `server/types/database.go`: the scan status constants and the database interfaces
+- `server/database/gorm/record.go` and `migration.go`: the `Record` model's cascading relations and the list of tables `AutoMigrate` creates
+- `reconciler/tasks/scan/task.go`: the only place scans run (`Run`, `scanRecord`, `recordOutcome`)
+- `utils/scanner/`: the MCP, Skill and A2A runners (`merge()` in `mcp.go` drops the scanner version)
+- Later, for PR 2: `proto/agntcy/dir/security/v1/`, `server/controller/`, `server/authz/`, `client/scan.go`, `cli/cmd/`
 
 **Toolkit**
 
-- Tool:
-- What it produced:
-- Difficulties:
-- What changed:
+- Tool: Claude Code with `gh` and `git grep`, reading the issue thread and only the scan subsystem's code, then distilling it into my `CLAUDE.local.md`.
+- What it produced: a map of where scans live (`scan.go`, `types/database.go`, the reconciler's scan task, the runners) and confirmation that nothing named `NewScan`, `ListScans`, `security_scans`, pending or running exists.
+- Difficulties: the issue was opened before #2086/#2095, which already covered part of it, so I had to separate what was still missing from what was done.
+- What changed: I scoped the issue to the remaining gaps (history, progress states, API/CLI) and said so in my follow-up comment.
 
 ---
 
@@ -164,67 +169,102 @@ Since #2086 (via #2095), `scan_reports` records a completed/partial/failed outco
 
 **Analysis**
 
-[Your analysis of the root cause: what is causing the issue, traced
-to the files and functions involved.]
+The missing history comes from how `scan_reports` is keyed. `ScanReport` (`server/database/gorm/scan.go`) has a primary key of `(record_cid, scanner_type)`, and `UpsertScanReport` does `ON CONFLICT ... DO UPDATE`, so each scan replaces the last. That table is also read by scheduling (`GetRecordsNeedingScan`), search filters, policy facts and pruning as "the current state", so it can't hold history without changing all of those readers. There are no pending/running states because the only statuses (`server/types/database.go`) describe a scan's result, not its progress. And there's no API because scans are only started by the reconciler's scan task (`reconciler/tasks/scan/task.go`): `Run` picks records through `GetRecordsNeedingScan`, `scanRecord` runs the MCP, Skill and A2A runners, and `recordOutcome` writes the result.
 
 **Proposed Solution**
 
-[High-level description of your fix approach, and what you are
-deliberately NOT changing.]
+Following the design agreed with the maintainers ([akijakya](https://github.com/agntcy/dir/issues/1874#issuecomment-6795743395), [ramizpolic](https://github.com/agntcy/dir/issues/1874#issuecomment-6797562597)):
+
+- A new `security_scans` table with one row per scanner run, grouped by a `scan_id` for one pass over a record. It has progress statuses (`pending`, `running`, `succeeded`, `failed`), a trigger (`scheduled` or `manual`), `scanner_version`, `requested_by`, timestamps, and a copy of the verdict.
+- When a scanner finishes, its `security_scans` row and the `scan_reports` upsert are written in the same transaction, so history and current state never disagree.
+- A foreign key to `records` with `ON DELETE CASCADE`, like `scan_reports`.
+- A manual scan starts as one placeholder row with an empty `scanner_type`, because only the reconciler finds out which scanners apply to a record. The first scanner that runs takes it over.
+
+The work is split into two PRs. **PR 1 (this story):** the table and the reconciler recording history. **PR 2:** the `NewScan`/`ListScans` Admin API with auth rules, the Go client and `dirctl`.
+
+Deliberately not changing: what `scan_reports` means or how it's written (same rows, same retry schedule), scheduling, search filters, policy facts, ingest of peers' reports, and the scanner interface. No retention or cleanup job (ramizpolic asked for that to be a separate issue). Selecting a single scanner in `NewScan` is left out; the issue only asks for a CID.
 
 **Implementation Plan**
 
-1. [Modify file X to do Y]
-2. [Add or change Z]
-3. [Update tests]
+PR 1, layer 1 (storage):
 
-[Record deviations here as they happen: what changed mid-build and
-why. A recorded deviation is honest work; silent drift is not.]
+1. `server/types/database.go`: progress statuses, triggers, the `SecurityScanObject` interface, and a `SecurityScanDatabaseAPI` interface added to `DatabaseAPI`.
+2. New `server/database/gorm/security_scan.go`: the `SecurityScan` model with indexes, and the methods `CreatePendingScan` (dedup and cooldown), `ListPendingScans`, `StartScannerRun`, `FinishScannerRun`, `DiscardScannerRun`, `CloseScanPlaceholder`, `FailStuckScans` and `ListScans`.
+3. `server/database/gorm/scan.go`: move `UpsertScanReport`'s logic, unchanged, into a helper that runs inside the caller's transaction.
+4. `record.go`: add `SecurityScans` with `OnDelete:CASCADE`. `migration.go`: add `SecurityScan{}` to `AutoMigrate`. A new table needs no numbered migration.
+5. Tests in `security_scan_test.go`, plus no-op stubs in `reconciler/tasks/signature/task_test.go`, whose fake implements the whole database interface by hand.
+
+PR 1, layer 2 (reconciler), planned:
+
+6. `reconciler/tasks/scan/task.go`: fail stuck scans at the start of each run, run pending manual scans, give each pass a `scan_id`, wrap each scanner run in `StartScannerRun` → `FinishScannerRun` (or `DiscardScannerRun` if it didn't apply), and close unused placeholders.
+7. `utils/scanner/mcp.go`: carry the scanner version through `merge()`.
+8. Reconciler tests with a fake DB and fake runners, checking that `scan_reports` gets exactly the same writes as before.
+
+Deviations so far:
+
+- **Two PRs instead of one** (2026-11-11), so the schema gets reviewed before the API is built on it.
+- **Column `scan_trigger` instead of `trigger`**, because `TRIGGER` is an SQL keyword and this package writes raw `Where` strings.
+- **No "claim" step for pending scans** (2026-11-11). My first version flipped a request to `running` as soon as the reconciler picked it up, before any scanner ran. I changed it so a request stays `pending` until its first scanner starts, which keeps `running` meaning one thing everywhere. That's safe because the reconciler runs as a single replica (`replicas: 1`) and never overlaps its own runs.
+- **Added `DiscardScannerRun`** (2026-11-11). Scanners only find out they don't apply to a record after they've run, so the row created when they start has to be removed, or handed back as the placeholder, when they don't apply.
 
 **Toolkit**
 
-- Tool:
-- What it produced:
-- Difficulties:
-- What changed:
+- Tool: the issue thread with the maintainers, plus Claude Code reading the reconciler and scanner code; my own handoff notes kept the decisions in one place between sessions.
+- What it produced: the agreed design, a two-PR split, and the layer 1 file list above.
+- Difficulties: the thread left open what a pending row is, and the scanner interface only has `Name()` and `Run()`, so a scanner can't say it doesn't apply until it has run.
+- What changed: the placeholder-takeover design, `DiscardScannerRun`, and keeping requests `pending` until a scanner starts. These are recorded as deviations above and will go in the PR description. I haven't run plan-check on this plan yet.
 
 ---
 
 ## Testing Strategy
 
-[What observable checks prove the fix: your reproduction steps re-run
-against the built change (before and after), and the repo's own test
-suite or checks with the outcome shown. "Tests pass" with nothing
-observable named is not a strategy.]
+**Reproduction, before and after.** Before: my repro (two scans of the same record and scanner, failed then completed) leaves one `scan_reports` row and no history anywhere. After: the same two scans leave **two** `security_scans` rows (`failed` with reason `network`, then `succeeded`) **and still one** `scan_reports` row with the latest result. My repro test asserted two `scan_reports` rows, which the agreed design deliberately doesn't do, so it stays on my fork as the reproduction only. Its "after" is `TestFinishScannerRun_KeepsHistoryWhileScanReportsOverwrites`.
+
+**Storage (layer 1), done.** 13 unit tests in `server/database/gorm/security_scan_test.go`, on in-memory SQLite like the repo's existing scan tests. They cover history kept while `scan_reports` still overwrites, the verdict and scanner version copied, a failed write rolling back the `scan_reports` upsert, dedup and cooldown in `CreatePendingScan`, `ListPendingScans` changing nothing, placeholder takeover, discarding a scanner that didn't apply (deleted, or handed back as the placeholder), closing an unused placeholder, only old `running` rows failed as interrupted, list order/filter/paging, and cascade on record delete. Command: `cd server && go test ./database/gorm/ -count=1`.
+
+**Nothing existing changed.** The 26 existing scan, upsert, scheduling and cascade tests must still pass, and `git diff -w server/database/gorm/scan.go` should show only the function split, no logic change.
+
+**Reconciler (layer 2), planned.** Tests with a fake DB and fake runners for a scheduled pass, a manual scan, a scanner that doesn't apply, a scanner failure, and a record that can't be pulled, each checking that `scan_reports` gets exactly the writes it gets today.
+
+**The repo's own checks.** `task test:unit` and the repo's golangci-lint (run through its pre-commit hook) must pass. These will be the rows of my ship-gate manifest.
+
+**End to end, planned.** One real run with the reconciler and at least one scanner installed: scan a record twice and show two history rows plus one `scan_reports` row. This goes in my PR description as the observable proof.
 
 **Toolkit**
 
-- Tool:
-- What it produced:
-- Difficulties:
-- What changed:
+- Tool: `go test` on in-memory SQLite, the repo's golangci-lint through its pre-commit hook, and `task test:unit`.
+- What it produced: 13 passing layer-1 tests, 0 lint issues in `server` and `reconciler`, and a full `task test:unit` pass (107 packages ok) on the first layer-1 version.
+- Difficulties: the first lint run found 4 issues in my code (3 unwrapped errors and a 17-method interface); unit tests can't exercise the real scanners; and I changed layer 1 after that full-suite run, so it needs re-running.
+- What changed: I wrapped the errors and exempted the interface with `//nolint:interfacebloat`, following the repo's own precedent in `server/types/signature.go`. I added an end-to-end run to the plan for real evidence.
 
 ---
 
 ## Implementation Notes
 
-[A running log, added to as you work. Date each entry. What you
-built, decisions you made when you made them, wrong turns included.]
+**2026-11-08**
 
-**[Date]**
+Claimed #1874 with a short comment. My voice guard and repro-check later both flagged it as too generic.
 
-[Entry]
+**2026-11-09**
 
-**[Date]**
+Set the project up in WSL2 (`task deps`, `task build`, `task test:unit` all passing) and posted a follow-up with what #2086/#2095 already cover, what's still missing, a proposed approach, and two design questions: a separate table or not, and retention.
 
-[Entry]
+**2026-11-11**
+
+Reproduced the gap on `main` (`226a94c9`) with a failing test, pushed to my fork. Both maintainers answered: a separate `security_scans` table, written in the same transaction as `scan_reports`, cascade on record delete, store `scanner_version`, no cleanup job for now, and admin-only auth. I confirmed on the thread. I decided to ship in two PRs, table and reconciler first.
+
+Wrong turn: my repro test asserts that `scan_reports` keeps two rows, but the agreed design keeps `scan_reports` overwriting and puts history in the new table. I kept the test on my fork as the reproduction only and left it out of the PR.
+
+**2026-11-11**
+
+Built layer 1 on `feat/1874-security-scans` (not committed yet): the types, the `SecurityScan` model and its DB methods, the transaction helper in `scan.go`, cascade and `AutoMigrate`, and 13 tests. Claude wrote the code; I asked for it file by file at first, then a layer at a time, and reviewed it. Decisions: column `scan_trigger` (SQL keyword), verdict copied into each history row, and `FinishScannerRun` rolling back the `scan_reports` write if its history row is missing. Then two changes after my review: a request now stays `pending` until a scanner actually starts, instead of turning `running` when the reconciler picks it up; and `DiscardScannerRun` handles scanners that turn out not to apply.
 
 **Toolkit**
 
-- Tool:
-- What it produced:
-- Difficulties:
-- What changed:
+- Tool: Claude Code writing the code a file or a layer at a time while I reviewed each step, and the repo's pre-commit hook (golangci-lint through `task`).
+- What it produced: layer 1 (7 files: 2 new, 5 edited) with tests, plus a whitespace-ignored diff showing `scan.go`'s logic is unchanged.
+- Difficulties: edits sent through `wsl` with a heredoc silently didn't apply once (the linter output stayed the same, which is how I caught it); the pre-commit hook needs Go and Task on the PATH; and a test fake implements the whole database interface by hand, so new methods broke its compile until I added stubs.
+- What changed: the edits now go through script files instead of heredocs, I export the PATH in every WSL command, and I wrapped errors the way the linter asked.
 
 ---
 
@@ -273,10 +313,8 @@ Toolkit blocks above are full of them.]
 
 ## Resources Used
 
-[What actually helped, not a reading list. List things this story
-already shows you using: the doc you followed to set the environment
-up, the thread that explained the bug, the person who answered you.
-One real entry beats ten plausible ones.]
-
-- [Link to documentation that helped]
-- [Discussion, issue, or post that helped]
+- [agntcy/dir README, Development section](https://github.com/agntcy/dir#development): the `task deps`, `task build` and `task test:unit` commands I set the project up with.
+- [agntcy/dir CONTRIBUTING.md](https://github.com/agntcy/dir/blob/main/CONTRIBUTING.md): the DCO sign-off rule (`git commit -s`), tests required for new behavior, and the ~10-day review window.
+- [Issue #1874 thread](https://github.com/agntcy/dir/issues/1874): akijakya's [answer to my design questions](https://github.com/agntcy/dir/issues/1874#issuecomment-6795743395) and ramizpolic's [follow-up](https://github.com/agntcy/dir/issues/1874#issuecomment-6797562597) settled the design.
+- [Issue #2086](https://github.com/agntcy/dir/issues/2086) and [PR #2095](https://github.com/agntcy/dir/pull/2095): showed what had already been done for scan outcomes, and how `scan_reports` got its status columns.
+- The repo's own code as examples: `server/database/gorm/scan_test.go` (test helpers), `migrations/003_record_fk_on_delete_cascade.go` and `record.go` (how cascades are declared), and `server/types/signature.go` (the `interfacebloat` exemption).
