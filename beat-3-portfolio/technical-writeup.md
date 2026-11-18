@@ -2,7 +2,7 @@
 
 ## Overview
 
-[agntcy/dir](https://github.com/agntcy/dir) is an open-source directory of AI agents that security-scans registered agents. I worked on [issue #1874](https://github.com/agntcy/dir/issues/1874), which addressed a limitation where every new scan overwrote the previous result, leaving no history, no pending/running state, and no API to request a scan. I implemented a `security_scans` history table, updated the reconciler to record every scanner execution, and added admin-only `NewScan` and `ListScans` API endpoints. I also used two tools from my course toolkit: plan-check, where I wrote the rubric and grading procedure, and the course's ship-gate, where I wrote the validation manifest and the PR precheck rubric it runs. {TBA: the pull request link and where it stands today.}
+[agntcy/dir](https://github.com/agntcy/dir) is an open-source directory of AI agents that security-scans registered agents. I worked on [issue #1874](https://github.com/agntcy/dir/issues/1874), which addressed a limitation where every new scan overwrote the previous result, leaving no history, no pending/running state, and no API to request a scan. I implemented a `security_scans` history table, updated the reconciler to record every scanner execution, and added admin-only `NewScan` and `ListScans` API endpoints. I also used two tools from my course toolkit: plan-check, where I wrote the rubric and grading procedure, and the course's ship-gate, where I wrote the validation manifest and the PR precheck rubric it runs. I opened it as a draft, [pull request #2514](https://github.com/agntcy/dir/pull/2514), on November 18, and it is waiting on the maintainers' answers to two questions before review.
 
 ## What happened
 
@@ -92,7 +92,7 @@ Standards and comms [pass]
 
 ### 6. Pull request status
 
-{TBA}
+Before opening the PR, I rebased the branch onto the latest `main` and ran the ship-gate again; it passed at 5:50 PM on November 18. Six minutes later I opened [pull request #2514](https://github.com/agntcy/dir/pull/2514) as a draft, because I wanted the maintainers' input before asking for a formal review. The repository's automated checks for the PR title, DCO sign-off and labels all passed. A bot flagged the PR as larger than 2,000 lines, so I replied that about 940 of those lines are generated from the new proto file and about 970 are tests. The PR asks the maintainers two questions: what end-to-end coverage they want, and whether manual scans may wait for the scan interval until the follow-up PR. As of writing, they have not replied yet.
 
 The initial implementation covers historical storage, reconciler integration, and the admin API. I have kept additional functionality separate for a follow-up PR, including client support, `dirctl scan`, recovery of scans stuck in `running`, and scan cooldowns.
 

@@ -11,7 +11,7 @@ files and no evidence uploads are part of Assignment 5.
 **Student:** Chris
 **GitHub Username:** cbmary27
 **Issue:** https://github.com/agntcy/dir/issues/1874
-**Pull Request:** [GitHub PR link, once opened]
+**Pull Request:** https://github.com/agntcy/dir/pull/2514
 
 One repository, built across units 5 to 8, telling the whole story of your real
 contribution. Fill it as you work, not at the end — the sections below ask for evidence that
@@ -66,10 +66,9 @@ My rubric passed them because it has no adoption check, and the ranking let K1rL
 
 I added Upstream rules for claims, questions and pings to my voice guide (my vague nomnom comment became a "Wrong" example) and wired the guard in as a Claude Code hook. On Windows that broke twice: `python3` is only a Microsoft Store placeholder, so I changed the hook to call `python`, and Git Bash's `ln -s` silently makes copies, so I used one-line pointer files instead. My claim on #1874 was posted before the guard existed, so I ran the guard's manual check on it afterwards: it stopped my 2026-11-08 comment on my own rule "A claim names my first step and when I'll report back", and repro-check rejected it as not specific to the issue. Only my 2026-11-09 follow-up made the claim pass. While doing that I found that my installed repro-check had been grading with my Unit 3 plan-check rubric, so I restored my Unit 2 rubric from `tools/repro-check/`. I also wrote `CLAUDE.local.md` in my clone (DCO sign-off, the scan subsystem's 4 key files, the exact build and test commands, and the WSL PATH fix Go and Task need), kept out of git with `.git/info/exclude`.
 
-**Unit 7: [one line on the tool work]**
+**Unit 7: Installed the ship-gate and wrote a manifest for agntcy/dir's two CI checks**
 
-[2-4 sentences: the ship-gate and your gate manifest. What it produced
-on your real branch, what fought you, what changed because of it.]
+My clone and its Go toolchain live in WSL, but Claude Code, my skills and the voice guard are on Windows, so I ran the gate on Windows against `\\wsl.localhost\Ubuntu\home\chris27\dir`. That fought me three times: Windows git refused the clone as "dubious ownership" until I added it to `safe.directory`, the installed hook called `python3` (the Microsoft Store placeholder again) so I changed it to `python`, and the manifest's commands have to call into WSL (`wsl -e bash -lc "... cd ~/dir && task test:unit"`), because the gate runs them in a fresh Windows shell. My manifest has the two checks the repo's CI runs, `task test:unit` and `task lint`, and I tested both exactly as the gate runs them: exit 0, no failing package, 0 lint issues (lint takes about 6 minutes). I also found that both of my hooks only watch Claude Code's Bash tool, so on Windows a PR opened through the PowerShell tool would skip them. For the hook test I ran `gh pr create --help` through Bash: the ship-gate stopped it because no fresh pass existed, and the voice guard stopped it too because a `--help` call has no body to read (my voice-guard log records its stop at 16:04 on 2026-11-16). The gate's first real run on my branch on 2026-11-16 stopped me: it saw a 177-file diff full of release, UI and identity changes, because my local `main` was stale and Windows git was reporting line-ending and file-mode changes that weren't real. I reset `main` to `origin/main`, set `core.autocrlf=false` and `core.filemode=false` in the clone, re-ran my tests on the committed head, and the second run passed. That pass also flagged six new files committed as executable, which I fixed in a small commit. On 2026-11-18 I rebased onto the latest `main` and ran the gate again; it passed at 17:50 (unit tests in 11s, lint in 530s, all four precheck criteria passing). I then opened the PR myself in the browser at 17:56 as a draft, so the gate hook didn't see the open itself, and I made a few small wording edits to the description while opening it.
 
 **Unit 8: [one line on the tool work]**
 
@@ -212,6 +211,16 @@ PR 1, layer 3 (API):
 9. New `server/controller/scan.go`: validates the CID, returns NotFound for a record this node hasn't indexed, queues the scan under the caller's SPIFFE ID, and maps rows to the proto.
 10. `server/server.go`: register the service only when authorization is enabled, like the policy audit service. `server/authz/authorizer.go`: add both methods to `identityOnlyMethods`, so only a rule naming an admin's SPIFFE ID grants them, never a whole trust domain. README entry and an authz test.
 
+Test plan (run in WSL, from `~/dir` unless noted):
+
+1. **Reproduction, before.** On my repro branch (`~/dir-repro`, commit `4221fc50`, based on `main`): `cd server && go test ./database/gorm/ -run TestRepro1874 -v -count=1`. Two scans of one record by the MCP scanner, failed with reason `network` and then completed. Expected on `main`: the test fails with "should have 2 item(s), but has 1", because one `scan_reports` row is left and the failure is gone.
+2. **Reproduction, after.** The same two scans on `feat/1874-security-scans`, written the way the reconciler now writes them (`StartScannerRun` then `FinishScannerRun` for each), as a temporary copy of the repro test that isn't committed: `cd server && go test ./database/gorm/ -run TestRepro1874 -v -count=1`. Expected: it passes, with **two** `security_scans` rows (`failed` with reason `network`, then `succeeded`) and **still one** `scan_reports` row holding the latest result. That shows history is kept while the current-state table works as before.
+3. **Storage tests.** `cd server && go test ./database/gorm/ -count=1`. Expected: the new `security_scan_test.go` tests pass, including `TestFinishScannerRun_KeepsHistoryWhileScanReportsOverwrites` (the permanent version of step 2) and `TestSecurityScans_DeletedWithRecord` (cascade), and every existing scan test still passes. `git diff -w main -- server/database/gorm/scan.go` shows only the function split.
+4. **Reconciler tests.** `cd reconciler && go test ./tasks/scan/ -count=1`. Expected: the `TestRun_*` tests pass, showing a scheduled pass writes history under one `scan_id`, a scanner that doesn't apply leaves no row, a manual scan runs once before the scheduled pass, and `scan_reports` is still written when a history write fails.
+5. **API and auth tests.** `cd server && go test ./controller/ ./authz/ -count=1`. Expected: the `TestScan_*` controller tests and `TestAuthorize_ScanServiceNeedsAdminIdentity` pass. That shows a scan is queued under the caller's identity, a bad or unindexed CID is rejected, and only a rule naming the admin grants the methods.
+6. **The repo's own checks.** `task test:unit` and `task lint`, as CI runs them. Expected: exit code 0 for both, with no failing package and 0 lint issues.
+7. **End to end: not done in this PR.** A real run needs authorization with SPIFFE identities, the scanner binaries and an LLM key (see the deviation below). I'll ask the maintainers in the PR which coverage they want.
+
 Deviations so far:
 
 - **Two PRs instead of one** (2026-11-11), so the schema gets reviewed before the API is built on it.
@@ -225,10 +234,10 @@ Deviations so far:
 
 **Toolkit**
 
-- Tool: the issue thread with the maintainers, plus Claude Code reading the reconciler and scanner code; my own handoff notes kept the decisions in one place between sessions.
-- What it produced: the agreed design, a two-PR split, and the layer 1 file list above.
-- Difficulties: the thread left open what a pending row is, and the scanner interface only has `Name()` and `Run()`, so a scanner can't say it doesn't apply until it has run.
-- What changed: the placeholder-takeover design, `DiscardScannerRun`, keeping requests `pending` until a scanner starts, and moving the API into PR 1 with the cooldown and stuck-scan recovery moved out. These are recorded as deviations above and will go in the PR description. I haven't run plan-check on this plan yet.
+- Tool: the issue thread with the maintainers and Claude Code reading the reconciler and scanner code to shape the design; then my Unit 3 plan-check, run on this section copied into `plan.md` plus a short `plan-comment.md` in my clone (never posted).
+- What it produced: the agreed design, the PR split and the file list above. plan-check's first run rejected the plan: Diagnosis and Scope passed, but Test failed because `plan.md` only listed test files to add, with no commands or expected result, and the comment said "rerun my reproduction" without saying what result proves the fix. After I added the Test plan above and the expected result to the comment, the second run accepted it.
+- Difficulties: the thread left open what a pending row is, and the scanner interface only has `Name()` and `Run()`, so a scanner can't say it doesn't apply until it has run. On the tool side, my procedure says to take the reproduction from a posted repro comment, and mine was never posted (it lives on my fork), so plan-check had to grade against the reproduction the drafts quote, a case my procedure doesn't cover. My real test plan was in Testing Strategy, which `plan.md` doesn't include, and that's what made the first run fail.
+- What changed: the placeholder-takeover design, `DiscardScannerRun`, keeping requests `pending` until a scanner starts, and moving the API into PR 1 with the cooldown and stuck-scan recovery moved out, all recorded as deviations above. I added the Test plan to this section so `plan.md` carries it. I'd add a step to my procedure for a reproduction that is quoted in the drafts but not posted.
 
 ---
 
@@ -244,7 +253,7 @@ Deviations so far:
 
 **API (layer 3), done.** 6 tests in `server/controller/scan_test.go`: a scan queued under the caller's identity, an existing scan returned instead of a duplicate, bad and unindexed CIDs rejected before anything is queued, database errors returned without their detail, the field mapping, and the status filter and paging. Plus `TestAuthorize_ScanServiceNeedsAdminIdentity`: only a rule naming the admin grants the methods, not the node's own trust domain, an auditor or a peer.
 
-**The repo's own checks.** `task test:unit` and the repo's golangci-lint (run through its pre-commit hook) must pass. These will be the rows of my ship-gate manifest.
+**The repo's own checks.** `task test:unit` and `task lint` (golangci-lint per module, buf and helm), the two checks the repo's CI runs, must pass. They're the two rows of my ship-gate manifest, and both pass on my branch.
 
 **End to end, deferred.** Not done, and listed as not done in the PR (see the deviation in Solution Approach). It would need auth with SPIFFE identities for the API, the scanner binaries plus an LLM key for real scans, and Docker for a cluster. I'm asking the maintainers in the PR which coverage they want: an in-process integration test, a local daemon run with the real scanners, or something in `tests/e2e`.
 
@@ -294,27 +303,23 @@ Wrong turn: I first assumed the pre-commit hook linted my whole working copy, so
 
 ## Pull Request
 
-**PR Link:** [GitHub PR URL when opened]
+**PR Link:** https://github.com/agntcy/dir/pull/2514 (draft, opened 2026-11-18, title `feat(dir): add security scan history and admin scan API`, `Refs #1874`)
 
-**PR Description:** [what the PR says; much of the content above
-adapts into it]
+**PR Description:** The PR is the first of two for #1874 and follows the design agreed on the issue. It says up front that it isn't ready to merge until the maintainers answer my questions. Its key changes are the `security_scans` history table (one row per scanner run, with status, trigger, scanner version and who asked, written in the same transaction as `scan_reports`), the reconciler recording history and running pending manual scans first, the admin-only `ScanService` with `NewScan` and `ListScans`, and the auth rule documented in the authz README, with the Helm default left unchanged and an offer to add an example. It walks through how a manual scan flows in four steps, lists the key files, and lists what's planned for the follow-up PR (client and `dirctl scan`, stuck-scan recovery and a cooldown, a faster manual loop, and keeping the MCP scanner's version). Testing covers the before/after reproduction and 25 new unit tests, with `task test:unit` and `task lint` passing, and says plainly what isn't tested yet: real scanner binaries, a running server with auth, and Postgres. It asks two questions: what end-to-end coverage they'd like, and whether manual scans can wait for the scan interval until the follow-up. It ends with an AI-use note.
 
 **Maintainer Feedback:**
 
-- [Date]: [feedback received, or "none yet"; silence is a normal
-  state and costs you nothing]
-- [Date]: [how you addressed it]
+- 2026-11-18: none yet. The only comment so far is the repo's size bot, which flagged the PR as over 2,000 lines and asked me to make sure it addresses one issue. I replied that 942 of the lines are generated by `buf` from the new proto and about 970 are tests, that it covers only #1874, and that the client, `dirctl scan`, stuck-scan recovery and the cooldown are already split into a follow-up PR.
+- The repo's automated checks (PR title, DCO, label) passed.
 
-**Status:** [Awaiting review / Iterating / Merged / Closed. The
-status is a fact you record, never a grade: the PR is graded as
-opened.]
+**Status:** Awaiting review (draft, waiting on answers to my two questions).
 
 **Toolkit**
 
-- Tool:
-- What it produced:
-- Difficulties:
-- What changed:
+- Tool: the ship-gate, running my two-check manifest (`task test:unit` and `task lint` through WSL) and then my pr-precheck rubric on the branch, title and description. I also used Claude Code to help trim the description and check its claims against the code.
+- What it produced: a stop on the first run (a 177-file diff from a stale local `main` and phantom Windows git changes), then passes on 2026-11-16 and again on the rebased branch on 2026-11-18, with notes such as the six files committed as executable, a missing sentence about the Helm default the maintainer had asked about, and questions that didn't say what I had already checked.
+- Difficulties: the gate runs on Windows against my WSL clone, so Windows git needed `safe.directory`, `core.autocrlf=false` and `core.filemode=false` before its diff matched reality; lint took 18 minutes on one run; a pass expires after 30 minutes and covers only the exact branch and description it checked, so rebasing meant running it again; and its hook only sees PRs opened through Claude Code's Bash tool, so opening in the browser skipped it.
+- What changed: I fixed the file modes in a separate commit, added the Helm sentence and a manual-scan walkthrough to the description, rebased and re-ran the gate before opening, and opened the PR as a draft. Next time I would make every description edit before the final gate run, so the posted text matches what was checked exactly.
 
 ---
 
